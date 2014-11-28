@@ -1,0 +1,355 @@
+#!/usr/bin/env perl
+use 5.12.0;
+use warnings;
+
+use JSON;
+use List::Util qw(max);
+use Path::Tiny;
+use POE qw(Wheel::Run Wheel::ReadWrite);
+
+POE::Session->create(
+  inline_states => {
+    _start           => \&on_start,
+
+    save_config       => \&do_save_config,
+
+    got_child_stdout  => \&on_child_stdout,
+    got_child_stderr  => \&on_child_stderr,
+    got_child_close   => \&on_child_close,
+    got_child_signal  => \&on_child_signal,
+    got_console_stdin => \&on_console_stdin,
+
+    got_xyz_teleport  => \&on_xyz_teleport,
+    got_cast_vote     => \&on_cast_vote,
+    election_complete => \&on_election_complete,
+    got_updated_player_count => \&on_updated_player_count,
+  }
+);
+
+POE::Kernel->run();
+exit 0;
+
+my $CONFIG;
+sub json {
+  state $JSON = JSON->new->canonical->pretty;
+}
+
+sub do_save_config {
+  path('soviet.json')->spew_raw( json()->encode($CONFIG) );
+}
+
+sub on_start {
+  my $json = path('soviet.json')->slurp_raw;
+  $CONFIG = $json ? json()->decode($json) : {};
+
+  my $child = POE::Wheel::Run->new(
+    Program => [
+      qw(java -Xms1024M -Xmx1024M -jar minecraft_server.1.8.jar nogui),
+    ],
+    StdoutEvent  => "got_child_stdout",
+    StderrEvent  => "got_child_stderr",
+    CloseEvent   => "got_child_close",
+
+    StdioFilter  => POE::Filter::Line->new(Literal => "\n"),
+  );
+
+  my $stdin =  POE::Wheel::ReadWrite->new(
+    InputHandle  => *STDIN,
+    OutputHandle => *STDERR, # Never used...
+    InputFilter => POE::Filter::Line->new(Literal => "\n"),
+    InputEvent  => 'got_console_stdin',
+  );
+
+  $_[HEAP]{stdin} = $stdin;
+
+  $_[KERNEL]->sig_child($child->PID, "got_child_signal");
+
+  $_[HEAP]{child} = $child;
+
+  # Signal events include the process ID.
+  $_[HEAP]{children_by_pid}{$child->PID} = $child;
+
+  print(
+    "Child pid ", $child->PID,
+    " started as wheel ", $child->ID, ".\n"
+  );
+}
+
+sub on_cast_vote {
+  my ($who, $which, $vote) = @_[ARG0, ARG1, ARG2];
+
+  # Election in progress?
+  #   YES: add/change vote
+  #   NO : Last election very recent?
+  #     YES: Complain and refuse.
+  #     NO : Begin new election.
+  my $election = ($_[HEAP]{election}{$which} ||= {});
+
+  if ($election->{completed_at}) {
+    if (
+      keys %{ $election->{votes} } > 1
+      and
+      $election->{completed_at} > time - 300
+    ) {
+      $_[HEAP]{child}->put("msg $who You can't change the $which again so soon!");
+      return;
+    }
+
+    $election = $_[HEAP]{election}{$which} = {};
+  }
+
+  if (! $election->{began_at}) {
+    $election->{began_at} = time;
+    $_[HEAP]{child}->put("list");
+    $_[KERNEL]->delay_set(election_complete => 31, $which);
+  }
+
+  $election->{votes}{$which} = $vote;
+}
+
+sub on_updated_player_count {
+  my ($curr, $max) = @_[ARG0, ARG1];
+  for my $which (keys %{ $_[HEAP]{election} }) {
+    my $votes = values %{ $_[HEAP]{election}{$which}{votes} };
+    if ($votes >= $curr) {
+      $_[KERNEL]->yield(election_complete => $which);
+    }
+  }
+}
+
+sub on_election_complete {
+  my ($which) = @_[ARG0,];
+
+  my $child    = $_[HEAP]{child};
+  my $election = $_[HEAP]{election}{$which};
+
+  if ($election->{completed_at}) {
+    # This happens when the on-delay event fires after the election completed
+    # because of a player count update. -- rjbs, 2014-11-28
+    return;
+  }
+
+  $election->{completed_at} = time;
+
+  my @votes    = values %{ $election->{votes} };
+
+  my %score;
+  $score{$_} ++ for values %{ $election->{votes} };
+  my @ranked = sort { $score{$b} <=> $score{$a} } keys %score;
+  if (@votes > 1 && $score{ $ranked[0] } == $score{ $ranked[1] }) {
+    # n-way tie, no change?
+    $child->put("say The $which vote was a tie.  Nothing will change.");
+    return;
+  }
+
+  my $winner = $ranked[0];
+
+  if ($which eq 'rain') {
+    if    ($winner eq 'on')   { $child->put("weather rain");    }
+    elsif ($winner eq 'off')  { $child->put("weather clear");   }
+    elsif ($winner eq 'hard') { $child->put("weather thunder"); }
+
+  } elsif ($which eq 'time') {
+    if    ($winner eq 'sunrise') { $child->put("time set day"); }
+    elsif ($winner eq 'sunset')  { $child->put("time set night"); }
+
+  } else {
+    warn "don't know how to handle $which election!!";
+  };
+}
+
+sub on_xyz_teleport {
+  my ($who, $tp) = @_[ARG0, ARG1];
+
+  return unless my $callbacks = $_[HEAP]{tp}{$who};
+
+  for my $key (keys %$callbacks) {
+    my $callback = delete $callbacks->{$key};
+    $callback->{code}->(@_) unless time > $callback->{expires_at};
+  }
+}
+
+sub home_for {
+  my ($player) = @_;
+
+  $CONFIG->{home}{$player} || '1 86 1';
+}
+
+sub porch_for {
+  my ($player) = @_;
+  $CONFIG->{porch}{$player} || home_for($player);
+}
+
+# Wheel event, including the wheel's ID.
+sub on_child_stdout {
+  my ($stdout_line, $wheel_id) = @_[ARG0, ARG1];
+  my $child = $_[HEAP]{child};
+  # print "pid ", $child->PID, " STDOUT: $stdout_line\n";
+  print "$stdout_line\n";
+
+  # [11:01:21] [Server thread/INFO]: rjbs joined the game
+  # [11:01:28] [Server thread/INFO]: <rjbs> go home
+  return unless my $parse = naive_parse($stdout_line);
+
+  if (my $tp = tp_parse($parse->{message})) {
+    $_[KERNEL]->yield(got_xyz_teleport => lc $tp->{who}, $tp);
+    return;
+  }
+
+  if (
+    my ($curr, $max) =
+      $parse->{message} =~ m{\AThere are ([0-9]+)/([0-9]+) players}
+  ) {
+    $_[KERNEL]->yield(got_updated_player_count => $curr, $max);
+    return;
+  }
+
+  if (my ($who, $what) = $parse->{message} =~ /\A<([^>]+)>\s+(.+)\z/) {
+    $who  = lc $who;
+    $what = lc $what;
+
+    if    ($what eq '!hub')     { $child->put("tp $who 1 86 1"); }
+    elsif ($what eq '!home')    { $child->put("tp $who " . home_for($who)); }
+
+    elsif ($what eq '!set home')  {
+      $_[HEAP]{tp}{$who}{home} = {
+        expires_at => time + 5,
+        code       => sub {
+          my ($tp) = @_[ARG1,];
+          $CONFIG->{home}{$who} = "$tp->{x} $tp->{y} $tp->{z}";
+          $_[KERNEL]->yield('save_config');
+          $child->put("msg $who Your home has been updated.");
+        },
+      };
+      $child->put("tp $who ~ ~ ~");
+    }
+
+    elsif ($what eq '!set porch')  {
+      $_[HEAP]{tp}{$who}{porch} = {
+        expires_at => time + 5,
+        code       => sub {
+          my ($tp) = @_[ARG1,];
+          $CONFIG->{porch}{$who} = "$tp->{x} $tp->{y} $tp->{z}";
+          $_[KERNEL]->yield('save_config');
+          $child->put("msg $who Your front porch location has been updated.");
+        },
+      };
+      $child->put("tp $who ~ ~ ~");
+    }
+
+    elsif ($what eq '!sunrise') {
+      $_[KERNEL]->yield(got_cast_vote => $who, 'time', 'sunrise');
+      $child->put("msg $who You cast your vote for sunrise.");
+    }
+    elsif ($what eq '!sunset') {
+      $_[KERNEL]->yield(got_cast_vote => $who, 'time', 'sunset');
+      $child->put("msg $who You cast your vote for sunset.");
+    }
+
+    elsif ($what eq '!rain on') {
+      $_[KERNEL]->yield(got_cast_vote => $who, 'rain', 'on');
+      $child->put("msg $who You cast your vote for rain.");
+    }
+    elsif ($what eq '!rain off') {
+      $_[KERNEL]->yield(got_cast_vote => $who, 'rain', 'off');
+      $child->put("msg $who You cast your vote for clear skies.");
+    }
+    elsif ($what eq '!rain hard') {
+      $_[KERNEL]->yield(got_cast_vote => $who, 'rain', 'hard');
+      $child->put("msg $who You cast your vote for a thunderstorm.");
+    }
+
+    elsif ($what =~ /\A!visit (\S+)\z/) {
+      $child->put("tp $who " . porch_for($1));
+    }
+
+    elsif ($what =~ /\A!mode (creative|survival)\z/i) {
+      my $mode = $1 eq 'creative' ? 1 : 0;
+      $child->put("gamemode $mode $who");
+    }
+
+    elsif ($what =~ /\A!join (\S+)\z/) {
+      # If $1 isn't a player, report an error.
+      $child->put("tp $who $1");
+    }
+  }
+}
+
+sub tp_parse {
+  my ($msg) = @_;
+
+  # [22:15:01] [Server thread/INFO]:
+  # Teleported rjbs to 688.330745199867, 75.0, 479.96637932110707
+
+  my ($who, $x, $y, $z) = $msg =~ /\A
+    Teleported \s (\S+) \s to \s
+    ([0-9]+\.[0-9]+), \s
+    ([0-9]+\.[0-9]+), \s
+    ([0-9]+\.[0-9]+)
+  \z/x;
+
+  return unless defined $who;
+  return { who => lc $who, x => $x, y => $y, z => $z };
+}
+
+sub naive_parse {
+  my ($line) = @_;
+  my ($ts, $channel, $rest) = $line =~ /
+    \A
+    \[([0-9]{2}:[0-9]{2}:[0-9]{2})\]
+    \s+
+    \[([^\]]+)\]:
+    \s+
+    (.+)
+  /x;
+
+  return unless defined $ts;
+
+  return {
+    timestamp => $ts,
+    channel   => $channel,
+    message   => $rest,
+  };
+}
+
+# Wheel event, including the wheel's ID.
+sub on_child_stderr {
+  my ($stderr_line, $wheel_id) = @_[ARG0, ARG1];
+  my $child = $_[HEAP]{child};
+  # print "pid ", $child->PID, " STDERR: $stderr_line\n";
+  warn "$stderr_line\n";
+}
+
+# Wheel event, including the wheel's ID.
+sub on_child_close {
+  my $wheel_id = $_[ARG0];
+  my $child = delete $_[HEAP]{child};
+
+  # May have been reaped by on_child_signal().
+  unless (defined $child) {
+    print "wid $wheel_id closed all pipes.\n";
+    return;
+  }
+
+  print "pid ", $child->PID, " closed all pipes.\n";
+  delete $_[HEAP]{stdin};
+  delete $_[HEAP]{children_by_pid}{$child->PID};
+}
+
+sub on_child_signal {
+  print "pid $_[ARG1] exited with status $_[ARG2].\n";
+  my $child = delete $_[HEAP]{children_by_pid}{$_[ARG1]};
+
+  # May have been reaped by on_child_close().
+  return unless defined $child;
+
+  delete $_[HEAP]{child};
+}
+
+sub on_console_stdin {
+  my ($input) = $_[ARG0];
+
+  chomp $input;
+
+  $_[HEAP]{child}->put($input);
+}
