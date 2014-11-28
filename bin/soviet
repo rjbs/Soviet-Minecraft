@@ -169,10 +169,14 @@ sub on_xyz_teleport {
   }
 }
 
+sub hub_xyz {
+  $CONFIG->{hub}
+}
+
 sub home_for {
   my ($player) = @_;
 
-  $CONFIG->{home}{$player} || '1 86 1';
+  $CONFIG->{home}{$player} || hub_xyz;
 }
 
 sub porch_for {
@@ -208,7 +212,7 @@ sub on_child_stdout {
     $who  = lc $who;
     $what = lc $what;
 
-    if    ($what eq '!hub')     { $child->put("tp $who 1 86 1"); }
+    if    ($what eq '!hub')     { $child->put("tp $who " . hub_xyz) }
     elsif ($what eq '!home')    { $child->put("tp $who " . home_for($who)); }
 
     elsif ($what eq '!set home')  {
