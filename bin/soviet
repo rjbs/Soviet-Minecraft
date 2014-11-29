@@ -100,11 +100,11 @@ sub on_cast_vote {
 
   if (! $election->{began_at}) {
     $election->{began_at} = time;
-    $_[HEAP]{child}->put("list");
     $_[KERNEL]->delay_set(election_complete => 31, $which);
   }
 
   $election->{votes}{$which} = $vote;
+  $_[HEAP]{child}->put("list"); # to trigger early termination
 }
 
 sub on_updated_player_count {
