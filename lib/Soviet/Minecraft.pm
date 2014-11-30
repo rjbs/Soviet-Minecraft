@@ -177,10 +177,10 @@ event _http_sms => sub {
 
   if (defined $reply) {
     $response->code(200);
-    $response->content("Does not compute.");
+    $response->content($reply);
   } else {
     $response->code(200);
-    $response->content($reply);
+    $response->content("Does not compute.");
   }
 
   $kernel->call( 'httpd', 'DONE', $response );
