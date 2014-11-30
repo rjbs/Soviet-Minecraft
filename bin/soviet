@@ -44,7 +44,7 @@ sub on_start {
 
   my $child = POE::Wheel::Run->new(
     Program => [
-      qw(java -Xms1024M -Xmx1024M -jar minecraft_server.1.8.jar nogui),
+      qw(java -Xms1024M -Xmx1024M -jar minecraft_server.1.8.1.jar nogui),
     ],
     StdoutEvent  => "got_child_stdout",
     StderrEvent  => "got_child_stderr",
