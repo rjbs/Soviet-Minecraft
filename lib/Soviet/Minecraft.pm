@@ -158,13 +158,13 @@ event _http_sms => sub {
   if ($text =~ /\Aallow ([-_0-9a-z]+)\z/i) {
     my $who = $1;
     $command = "whitelist add $who";
-    $result = "Okay, I've added $who to the whitelist!";
+    $reply   = "Okay, I've added $who to the whitelist!";
   } elsif ($text eq 'emergency shutdown' or $text eq 'emergency shut down') {
     $command = "stop";
-    $result = "I'm issuing an emergency shutdown!";
+    $reply   = "I'm issuing an emergency shutdown!";
   }
 
-  if (defined $result) {
+  if (defined $reply) {
     $response->code(200);
     $response->content("Does not compute.");
   } else {
@@ -176,7 +176,7 @@ event _http_sms => sub {
 
   warn("Request from " . $response->connection->remote_ip . " " . $request->uri->path_query);
 
-  if (defined $result and length $command) {
+  if (defined $reply and length $command) {
     $self->server->put($command);
   }
 };
