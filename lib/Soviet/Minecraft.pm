@@ -149,8 +149,8 @@ event _http_sms => sub {
   my $from = $param->{From} // '';
   $from =~ s/\A\+1//;
 
-  my $who = $self->username_for_phone($from);
-  unless ($param->{AccountSid} eq $self->config->{twilio_sid} and $who) {
+  my $sender_ok = $self->config->{allow_sms_from}->{$from};
+  unless ($param->{AccountSid} eq $self->config->{twilio_sid} and $sender_ok) {
     $response->code(400);
     $response->content("Bad request");
     $kernel->call( 'httpd', 'DONE', $response );
