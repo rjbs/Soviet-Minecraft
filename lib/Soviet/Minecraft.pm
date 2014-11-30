@@ -6,6 +6,7 @@ package Soviet::Minecraft;
 
 use MooseX::POE;
 
+use HTTP::Body;
 use JSON;
 use List::Util qw(max);
 use Path::Tiny;
@@ -121,6 +122,16 @@ sub _build_httpd {
     ],
     HEADERS => { Server => 'Synergy' },
   );
+}
+
+sub _params_from_req {
+  my ($self, $req) = @_;
+  my $body = HTTP::Body->new(
+    scalar $req->header('Content-Type'),
+    scalar $req->header('Content-Length'),
+  );
+  $body->add( $req->content );
+  return $body->param;
 }
 
 event _http_sms => sub {
