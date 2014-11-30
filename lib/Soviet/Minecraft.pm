@@ -7,6 +7,7 @@ use MooseX::POE;
 use JSON;
 use List::Util qw(max);
 use Path::Tiny;
+use POE::Component::Server::SimpleHTTP;
 use POE::Wheel::Run;
 use POE::Wheel::ReadWrite;
 
@@ -88,10 +89,127 @@ sub _setup_stdin {
   $self->stdin($stdin);
 }
 
+has httpd => (
+  is   => 'ro',
+  lazy => 1,
+  clearer => 'clear_httpd',
+  builder => '_build_httpd',
+);
+
+has httpd_port => (is => 'ro', lazy => 1, default => 8181);
+
+sub _build_httpd {
+  my ($self) = @_;
+
+  POE::Component::Server::SimpleHTTP->new(
+    ALIAS   => 'httpd',
+    ADDRESS => 0,
+    PORT    => $self->httpd_port,
+    HANDLERS => [
+      {
+        DIR => '^/sms$',
+        SESSION => $self->get_session_id,
+        EVENT => '_http_sms',
+      },
+      {
+        DIR => '.*',
+        SESSION => $self->get_session_id,
+        EVENT => '_http_404',
+      },
+    ],
+    HEADERS => { Server => 'Synergy' },
+  );
+}
+
+event _http_sms => sub {
+  my ($kernel, $self, $request, $response, $dirmatch)
+    = @_[ KERNEL, OBJECT, ARG0 .. ARG2 ];
+
+  # Check for errors
+  if (! defined $request) {
+    $kernel->call('httpd', 'DONE', $response );
+    return;
+  }
+
+  my $param = $self->_params_from_req($request);
+
+  my $from = $param->{From} // '';
+  $from =~ s/\A\+1//;
+
+  my $who = $self->username_for_phone($from);
+  unless ($param->{AccountSid} eq $self->config->{twilio_sid} and $who) {
+    $response->code(400);
+    $response->content("Bad request");
+    $kernel->call( 'httpd', 'DONE', $response );
+    warn sprintf "Bad request for %s from phone %s from IP %s",
+      $request->uri->path_query,
+      $from,
+      $response->connection->remote_ip;
+    return;
+  }
+
+  my $text = lc $param->{Body};
+
+  my $reply;
+  my $command;
+
+  if ($text =~ /\Aallow ([-_0-9a-z]+)\z/i) {
+    my $who = $1;
+    $command = "whitelist add $who";
+    $result = "Okay, I've added $who to the whitelist!";
+  } elsif ($text eq 'emergency shutdown' or $text eq 'emergency shut down') {
+    $command = "stop";
+    $result = "I'm issuing an emergency shutdown!";
+  }
+
+  if (defined $result) {
+    $response->code(200);
+    $response->content("Does not compute.");
+  } else {
+    $response->code(200);
+    $response->content($reply);
+  }
+
+  $kernel->call( 'httpd', 'DONE', $response );
+
+  warn("Request from " . $response->connection->remote_ip . " " . $request->uri->path_query);
+
+  if (defined $result and length $command) {
+    $self->server->put($command);
+  }
+};
+
+event _http_404 => sub {
+  my ($kernel, $self, $request, $response) = @_[KERNEL, OBJECT, ARG0 .. ARG2];
+
+  if (! defined $request) {
+    $kernel->call('httpd', 'DONE', $response );
+    return;
+  }
+
+  # Do our stuff to HTTP::Response
+  $response->code(404);
+  $response->content(
+    "Hi visitor from "
+    . $response->connection->remote_ip
+    . ", Page not found -> '"
+    . $request->uri->path . "'\n\n"
+  );
+
+  # We are done!
+  # For speed, you could use $_[KERNEL]->call( ... )
+  $kernel->call( 'httpd', 'DONE', $response );
+  warn
+    "Request from "
+    . $response->connection->remote_ip . " " . $request->uri->path_query;
+};
+
 sub START {
   my ($self) = @_;
   $self->_setup_server;
   $self->_setup_stdin;
+
+  $self->httpd;
 
   POE::Kernel->sig_child($self->server->PID, "got_child_signal");
 
@@ -365,6 +483,8 @@ event got_child_close => sub {
 
   $self->clear_server;
   $self->clear_stdin;
+  $_[KERNEL]->call('httpd', 'SHUTDOWN');
+  $self->clear_httpd;
   return;
 };
 
