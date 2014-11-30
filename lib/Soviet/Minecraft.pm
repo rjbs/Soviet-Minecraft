@@ -10,6 +10,11 @@ use Path::Tiny;
 use POE::Wheel::Run;
 use POE::Wheel::ReadWrite;
 
+has config_filename => (
+  is  => 'ro',
+  default => 'soviet.json',
+);
+
 has json => (
   is   => 'ro',
   lazy => 1,
@@ -19,12 +24,17 @@ has json => (
 has config => (
   is    => 'ro',
   lazy  => 1,
-  default => sub { $_[0]->json->decode( path('soviet.json')->slurp_raw ) },
+  default => sub {
+    my ($self) = @_;
+    $self->json->decode( path( $self->config_filename )->slurp_raw ),
+  },
 );
 
 event save_config => sub {
   my ($self) = @_[OBJECT,];
-  path('soviet.json')->spew_raw( $self->json->encode( $self->config ) );
+  path($self->config_filename)->spew_raw(
+    $self->json->encode( $self->config )
+  );
 };
 
 has server => (
@@ -33,12 +43,21 @@ has server => (
   clearer  => 'clear_server',
 );
 
+has minecraft_jar => (
+  is => 'ro',
+  lazy => 1,
+  default => sub {
+    my ($self) = @_;
+    $self->config->{minecraft_jar} || 'minecraft_server.jar';
+  },
+);
+
 sub _setup_server {
   my ($self) = @_;
 
   my $server = POE::Wheel::Run->new(
     Program => [
-      qw(java -Xms1024M -Xmx1024M -jar minecraft_server.1.8.1.jar nogui),
+      qw(java -Xms1024M -Xmx1024M -jar), $self->minecraft_jar, qw(nogui),
     ],
     StdoutEvent  => "got_child_stdout",
     StderrEvent  => "got_child_stderr",

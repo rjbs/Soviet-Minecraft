@@ -2,6 +2,15 @@
 use 5.12.0;
 use warnings;
 
+use Getopt::Long::Descriptive;
 use Soviet::Minecraft;
-my $soviet = Soviet::Minecraft->new;
+
+my ($opt, $usage) = describe_options(
+  '%c %o',
+  [ 'config|c=s', 'config filename' ],
+);
+
+my $soviet = Soviet::Minecraft->new({
+  ($opt->config ? (config_filename => $opt->config) : ()),
+});
 POE::Kernel->run;
