@@ -2,6 +2,8 @@ use 5.12.0;
 use warnings;
 
 package Soviet::Minecraft;
+# ABSTRACT: in Soviet Minecraft, server op you!
+
 use MooseX::POE;
 
 use JSON;

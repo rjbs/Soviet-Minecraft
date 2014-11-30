@@ -1,6 +1,8 @@
 #!/usr/bin/env perl
 use 5.12.0;
 use warnings;
+# PODNAME: soviet
+# ABSTRACT: a Minecraft launcher
 
 use Getopt::Long::Descriptive;
 use Soviet::Minecraft;
