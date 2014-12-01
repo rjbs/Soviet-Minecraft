@@ -232,6 +232,20 @@ sub START {
   );
 }
 
+has _election => (
+  init_arg => undef,
+  default  => sub {  {}  },
+  traits   => [ 'Hash' ],
+  handles  => {
+    elections    => 'keys',
+  },
+);
+
+sub election_for {
+  my ($self, $which) = @_;
+  $self->_election->{$which} ||= {};
+}
+
 event got_cast_vote => sub {
   my ($self, $who, $which, $vote) = @_[OBJECT, ARG0, ARG1, ARG2];
 
@@ -240,7 +254,7 @@ event got_cast_vote => sub {
   #   NO : Last election very recent?
   #     YES: Complain and refuse.
   #     NO : Begin new election.
-  my $election = ($_[HEAP]{election}{$which} ||= {});
+  my $election = $self->election_for($which);
 
   if ($election->{completed_at}) {
     if (
@@ -252,7 +266,7 @@ event got_cast_vote => sub {
       return;
     }
 
-    $election = $_[HEAP]{election}{$which} = {};
+    %$election = ();
   }
 
   if (! $election->{began_at}) {
@@ -260,14 +274,15 @@ event got_cast_vote => sub {
     $_[KERNEL]->delay_set(election_complete => 31, $which);
   }
 
-  $election->{votes}{$which} = $vote;
+  $election->{votes}{$who} = $vote;
   $self->server->put("list"); # to trigger early termination
 };
 
 event got_updated_player_count => sub {
-  my ($curr, $max) = @_[ARG0, ARG1];
-  for my $which (keys %{ $_[HEAP]{election} }) {
-    my $votes = values %{ $_[HEAP]{election}{$which}{votes} };
+  my ($self, $curr, $max) = @_[OBJECT, ARG0, ARG1];
+  for my $which ($self->elections) {
+    my $election = $self->election_for($which);
+    my $votes = values %{ $election->{votes} };
     if ($votes >= $curr) {
       $_[KERNEL]->yield(election_complete => $which);
     }
@@ -278,7 +293,7 @@ event election_complete => sub {
   my ($self, $which) = @_[OBJECT,ARG0];
 
   my $server   = $self->server;
-  my $election = $_[HEAP]{election}{$which};
+  my $election = $self->election_for($which);
 
   if ($election->{completed_at}) {
     # This happens when the on-delay event fires after the election completed
@@ -315,13 +330,28 @@ event election_complete => sub {
   };
 };
 
-event got_xyz_teleport => sub {
-  my ($who, $tp) = @_[ARG0, ARG1];
+has _tp_callbacks => (
+  is => 'ro',
+  init_arg => undef,
+  default  => sub {  {}  },
+  traits   => [ 'Hash' ],
+  handles  => {
+    delete_tp_callbacks_for => 'get',
+  },
+);
 
-  return unless my $callbacks = $_[HEAP]{tp}{$who};
+sub _set_tp_callback {
+  my ($self, $who, $name, $hashref) = @_;
+  $self->_tp_callbacks->{$who}{$name} = $hashref;
+}
+
+event got_xyz_teleport => sub {
+  my ($self, $who, $tp) = @_[OBJECT, ARG0, ARG1];
+
+  return unless my $callbacks = $self->delete_tp_callbacks_for($who);
 
   for my $key (keys %$callbacks) {
-    my $callback = delete $callbacks->{$key};
+    my $callback = $callbacks->{$key};
     $callback->{code}->(@_) unless time > $callback->{expires_at};
   }
 };
@@ -374,7 +404,7 @@ event got_child_stdout => sub {
     elsif ($what eq '!home')    { $server->put("tp $who " . $self->home_for($who)); }
 
     elsif ($what eq '!set home')  {
-      $_[HEAP]{tp}{$who}{home} = {
+      $self->_set_tp_callback($who => home => {
         expires_at => time + 5,
         code       => sub {
           my ($self, $tp) = @_[OBJECT,ARG1];
@@ -382,12 +412,12 @@ event got_child_stdout => sub {
           $_[KERNEL]->yield('save_config');
           $server->put("msg $who Your home has been updated.");
         },
-      };
+      });
       $server->put("tp $who ~ ~ ~");
     }
 
     elsif ($what eq '!set porch')  {
-      $_[HEAP]{tp}{$who}{porch} = {
+      $self->_set_tp_callback($who => porch => {
         expires_at => time + 5,
         code       => sub {
           my ($self, $tp) = @_[OBJECT,ARG1];
@@ -395,7 +425,7 @@ event got_child_stdout => sub {
           $_[KERNEL]->yield('save_config');
           $server->put("msg $who Your front porch location has been updated.");
         },
-      };
+      });
       $server->put("tp $who ~ ~ ~");
     }
 
@@ -476,9 +506,9 @@ sub naive_parse {
 
 # Wheel event, including the wheel's ID.
 event got_child_stderr => sub {
-  my ($stderr_line, $wheel_id) = @_[ARG0, ARG1];
-  my $child = $_[HEAP]{child};
-  # print "pid ", $child->PID, " STDERR: $stderr_line\n";
+  my ($self, $stderr_line, $wheel_id) = @_[OBJECT, ARG0, ARG1];
+  # my $server = $self->server;
+  # print "pid ", $child->server, " STDERR: $stderr_line\n";
   warn "$stderr_line\n";
 };
 
