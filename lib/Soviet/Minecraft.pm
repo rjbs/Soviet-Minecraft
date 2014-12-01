@@ -291,7 +291,7 @@ event election_complete => sub {
   my @votes    = values %{ $election->{votes} };
 
   my %score;
-  $score{$_} ++ for values %{ $election->{votes} };
+  $score{$_} ++ for @votes;
   my @ranked = sort { $score{$b} <=> $score{$a} } keys %score;
   if (@votes > 1 && $score{ $ranked[0] } == $score{ $ranked[1] }) {
     # n-way tie, no change?
