@@ -233,6 +233,7 @@ sub START {
 }
 
 has _election => (
+  is => 'ro',
   init_arg => undef,
   default  => sub {  {}  },
   traits   => [ 'Hash' ],
