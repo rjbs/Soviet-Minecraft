@@ -361,6 +361,27 @@ sub hub_xyz {
   $self->config->{hub}
 }
 
+sub random_unowned_location {
+  my ($self) = @_;
+  my @homes = map {; [ split /\s+/, $_ ] }
+              values %{ $self->config->{home} };
+
+  TRY: for (1 .. 100) {
+    my $x = int rand 1_000_000;
+    my $y = int rand 1_000_000;
+
+    for my $home (@homes) {
+      my $dist = sqrt( ($home->[0] - $x) ** 2
+                     + ($home->[1] - $y) ** 2);
+      next TRY if $dist < 10_000;
+    }
+
+    return "$x 100 $y";
+  }
+
+  return;
+}
+
 sub home_for {
   my ($self, $player) = @_;
 
@@ -414,6 +435,16 @@ event got_child_stdout => sub {
         },
       });
       $server->put("tp $who ~ ~ ~");
+    }
+
+    elsif ($what eq '!random') {
+      my $location = $self->random_unowned_location;
+      if ($location) {
+        $server->put("gamemode 1 $who");
+        $server->put("tp $who $location");
+      } else {
+        $server->put("msg $who I couldn't find a random place to send you!");
+      }
     }
 
     elsif ($what eq '!set porch')  {
