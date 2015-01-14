@@ -584,4 +584,19 @@ event got_console_stdin => sub {
   $self->server->put($input);
 };
 
+package Soviet::Minecraft::Point {
+  use Moose;
+  use namespace::autoclean;
+  has [ qw(x y z) ] => (is => 'rw', isa => 'Num', required => 1);
+
+  sub from_array {
+    my ($class, $arr) = @_;
+    $class->new({ x => $arr->[0], y => $arr->[0], z => $arr->[0] });
+  }
+
+  sub as_array {
+    return [ map {; $_[0]->$_ } qw(x y z) ]
+  }
+}
+
 1;
