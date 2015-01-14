@@ -362,25 +362,31 @@ event got_xyz_teleport => sub {
 
 sub hub_xyz {
   my ($self) = @_;
-  $self->config->{hub}
+  return @{ $self->config->{hub} }
+}
+
+sub hub_xyz_str {
+  my ($self) = @_;
+  return "@{ $self->config->{hub} }"
 }
 
 sub random_unowned_location {
   my ($self) = @_;
-  my @homes = map {; [ split /\s+/, $_ ] }
+  my @homes = map {; Soviet::Minecraft::Point->from_arrayref($_) }
               values %{ $self->config->{home} };
 
   TRY: for (1 .. 100) {
-    my $x = int rand 1_000_000;
-    my $y = int rand 1_000_000;
+    my $point = Soviet::Minecraft::Point->from_xyz(
+      int rand 1_000_000,
+      100,
+      int rand 1_000_000,
+    );
 
     for my $home (@homes) {
-      my $dist = sqrt( ($home->[0] - $x) ** 2
-                     + ($home->[1] - $y) ** 2);
-      next TRY if $dist < 10_000;
+      next TRY if $home->planar_distance_to($point) < 10_000;
     }
 
-    return "$x 100 $y";
+    return $point;
   }
 
   return;
@@ -389,12 +395,20 @@ sub random_unowned_location {
 sub home_for {
   my ($self, $player) = @_;
 
-  $self->config->{home}{$player} || $self->hub_xyz;
+  return Soviet::Minecraft::Point->from_arrayref(
+    $self->config->{home}{$player} || [ $self->hub_xyz ]
+  );
 }
 
 sub porch_for {
   my ($self, $player) = @_;
   $self->config->{porch}{$player} || $self->home_for($player);
+
+  if (my $porch = $self->config->{porch}{$player}) {
+    return Soviet::Minecraft::Point->from_arrayref($porch);
+  }
+
+  return $self->home_for($player);
 }
 
 # Wheel event, including the wheel's ID.
@@ -425,15 +439,15 @@ event got_child_stdout => sub {
     $who  = lc $who;
     $what = lc $what;
 
-    if    ($what eq '!hub')     { $server->put("tp $who " . $self->hub_xyz) }
-    elsif ($what eq '!home')    { $server->put("tp $who " . $self->home_for($who)); }
+    if    ($what eq '!hub')     { $server->put("tp $who " . $self->hub_xyz_str) }
+    elsif ($what eq '!home')    { $server->put("tp $who " . $self->home_for($who)->as_string); }
 
     elsif ($what eq '!set home')  {
       $self->_set_tp_callback($who => home => {
         expires_at => time + 5,
         code       => sub {
           my ($self, $tp) = @_[OBJECT,ARG1];
-          $self->config->{home}{$who} = "$tp->{x} $tp->{y} $tp->{z}";
+          $self->config->{home}{$who} = [ $tp->{where}->xyz ];
           $_[KERNEL]->yield('save_config');
           $server->put("msg $who Your home has been updated.");
         },
@@ -445,7 +459,7 @@ event got_child_stdout => sub {
       my $location = $self->random_unowned_location;
       if ($location) {
         $server->put("gamemode 1 $who");
-        $server->put("tp $who $location");
+        $server->put("tp $who " . $location->as_string);
       } else {
         $server->put("msg $who I couldn't find a random place to send you!");
       }
@@ -456,7 +470,7 @@ event got_child_stdout => sub {
         expires_at => time + 5,
         code       => sub {
           my ($self, $tp) = @_[OBJECT,ARG1];
-          $self->config->{porch}{$who} = "$tp->{x} $tp->{y} $tp->{z}";
+          $self->config->{porch}{$who} = [ $tp->{where}->xyz ];
           $_[KERNEL]->yield('save_config');
           $server->put("msg $who Your front porch location has been updated.");
         },
@@ -516,7 +530,10 @@ sub tp_parse {
   \z/x;
 
   return unless defined $who;
-  return { who => lc $who, x => $x, y => $y, z => $z };
+  return {
+    who   => lc $who,
+    where => Soviet::Minecraft::Point->from_xyz($x, $y, $z),
+  }
 }
 
 sub naive_parse {
@@ -584,18 +601,34 @@ event got_console_stdin => sub {
   $self->server->put($input);
 };
 
-package Soviet::Minecraft::Point {
+package
+  Soviet::Minecraft::Point {
   use Moose;
   use namespace::autoclean;
-  has [ qw(x y z) ] => (is => 'rw', isa => 'Num', required => 1);
+  has [ qw(x y z) ] => (is => 'ro', isa => 'Num', required => 1);
 
-  sub from_array {
-    my ($class, $arr) = @_;
-    $class->new({ x => $arr->[0], y => $arr->[0], z => $arr->[0] });
+  sub from_xyz {
+    my ($class, $x, $y, $z) = @_;
+    $class->new({ x => $x, y => $y, z => $z });
   }
 
-  sub as_array {
-    return [ map {; $_[0]->$_ } qw(x y z) ]
+  sub from_arrayref {
+    my ($class, $arr) = @_;
+    $class->new({ x => $arr->[0], y => $arr->[1], z => $arr->[2] });
+  }
+
+  sub xyz {
+    return map {; $_[0]->$_ } qw(x y z);
+  }
+
+  sub as_string {
+    return join q{ }, $_[0]->xyz;
+  }
+
+  sub planar_distance_to {
+    my ($self, $other) = @_;
+    return  sqrt( ($other->x - $self->x) ** 2
+                + ($other->z - $self->z) ** 2);
   }
 }
 
