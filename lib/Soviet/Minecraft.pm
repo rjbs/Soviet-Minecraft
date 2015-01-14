@@ -170,6 +170,9 @@ event _http_sms => sub {
     my $who = $1;
     $command = "whitelist add $who";
     $reply   = "Okay, I've added $who to the whitelist!";
+  } elsif ($text =~ /\Aannounce (.+)\z/i) {
+    $command = "say $1";
+    $reply   = "Okay, I've passed along that message!";
   } elsif ($text eq 'emergency shutdown' or $text eq 'emergency shut down') {
     $command = "stop";
     $reply   = "I'm issuing an emergency shutdown!";
