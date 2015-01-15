@@ -340,7 +340,7 @@ has _tp_callbacks => (
   default  => sub {  {}  },
   traits   => [ 'Hash' ],
   handles  => {
-    delete_tp_callbacks_for => 'get',
+    delete_tp_callbacks_for => 'delete',
   },
 );
 
