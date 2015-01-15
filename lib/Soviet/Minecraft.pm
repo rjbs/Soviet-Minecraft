@@ -492,7 +492,8 @@ event got_child_stdout => sub {
         code       => sub {
           my ($self, $tp) = @_[OBJECT,ARG1];
           $self->config->{place}{fc $name} = {
-            name => $name,
+            name     => $name,
+            named_by => $who,
             location => [ $tp->{where}->xyz ],
           };
           $_[KERNEL]->yield('save_config');
