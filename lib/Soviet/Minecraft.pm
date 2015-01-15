@@ -1,4 +1,4 @@
-use 5.12.0;
+use 5.18.0;
 use warnings;
 
 package Soviet::Minecraft;
@@ -411,6 +411,15 @@ sub porch_for {
   return $self->home_for($player);
 }
 
+sub place_named {
+  my ($self, $name) = @_;
+
+  my $place = $self->config->{place}{fc $name};
+  return $place
+       ? Soviet::Minecraft::Point->from_arrayref($place->{location})
+       : undef;
+}
+
 # Wheel event, including the wheel's ID.
 event got_child_stdout => sub {
   my ($self, $stdout_line, $wheel_id) = @_[OBJECT, ARG0, ARG1];
@@ -436,11 +445,22 @@ event got_child_stdout => sub {
   }
 
   if (my ($who, $what) = $parse->{message} =~ /\A<([^>]+)>\s+(.+)\z/) {
+    my $orig_what = $what;
     $who  = lc $who;
     $what = lc $what;
 
     if    ($what eq '!hub')     { $server->put("tp $who " . $self->hub_xyz_str) }
     elsif ($what eq '!home')    { $server->put("tp $who " . $self->home_for($who)->as_string); }
+
+    elsif ($orig_what =~ /\A!goto\s+(.+?)\s*\z/i) {
+      my $name = $1;
+      my $location = $self->place_named($name);
+      if ($location) {
+        $server->put("tp $who " . $location->as_string);
+      } else {
+        $server->put("msg $who I couldn't find a place called that!");
+      }
+    }
 
     elsif ($what eq '!set home')  {
       $self->_set_tp_callback($who => home => {
@@ -463,6 +483,23 @@ event got_child_stdout => sub {
       } else {
         $server->put("msg $who I couldn't find a random place to send you!");
       }
+    }
+
+    elsif ($orig_what =~ /\A!name\s+(.+?)\s*\z/) {
+      my $name = $1;
+      $self->_set_tp_callback($who => placename => {
+        expires_at => time + 5,
+        code       => sub {
+          my ($self, $tp) = @_[OBJECT,ARG1];
+          $self->config->{place}{fc $name} = {
+            name => $name,
+            location => [ $tp->{where}->xyz ],
+          };
+          $_[KERNEL]->yield('save_config');
+          $server->put(qq{msg $who You've named this place "$name"});
+        },
+      });
+      $server->put("tp $who ~ ~ ~");
     }
 
     elsif ($what eq '!set porch')  {
