@@ -491,13 +491,17 @@ event got_child_stdout => sub {
         expires_at => time + 5,
         code       => sub {
           my ($self, $tp) = @_[OBJECT,ARG1];
-          $self->config->{place}{fc $name} = {
-            name     => $name,
-            named_by => $who,
-            location => [ $tp->{where}->xyz ],
-          };
-          $_[KERNEL]->yield('save_config');
-          $server->put(qq{msg $who You've named this place "$name"});
+          if ($self->place_named($name)) {
+            $server->put(qq{msg $who The name "$name" is already taken!});
+          } else {
+            $self->config->{place}{fc $name} = {
+              name     => $name,
+              named_by => $who,
+              location => [ $tp->{where}->xyz ],
+            };
+            $_[KERNEL]->yield('save_config');
+            $server->put(qq{msg $who You've named this place "$name"});
+          }
         },
       });
       $server->put("tp $who ~ ~ ~");
