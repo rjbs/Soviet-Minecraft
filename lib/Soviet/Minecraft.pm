@@ -402,7 +402,6 @@ sub home_for {
 
 sub porch_for {
   my ($self, $player) = @_;
-  $self->config->{porch}{$player} || $self->home_for($player);
 
   if (my $porch = $self->config->{porch}{$player}) {
     return Soviet::Minecraft::Point->from_arrayref($porch);
@@ -543,7 +542,7 @@ event got_child_stdout => sub {
     }
 
     elsif ($what =~ /\A!visit (\S+)\z/) {
-      $server->put("tp $who " . $self->porch_for($1));
+      $server->put("tp $who " . $self->porch_for($1)->as_string);
     }
 
     elsif ($what =~ /\A!mode (creative|survival)\z/i) {
