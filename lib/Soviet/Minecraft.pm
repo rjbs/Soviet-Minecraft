@@ -13,6 +13,7 @@ use Path::Tiny;
 use POE::Component::Server::SimpleHTTP;
 use POE::Wheel::Run;
 use POE::Wheel::ReadWrite;
+use Time::Duration qw(ago);
 
 has config_filename => (
   is  => 'ro',
@@ -419,6 +420,12 @@ sub place_named {
        : undef;
 }
 
+event saw_player => sub {
+  my ($self, $who) = @_[OBJECT, ARG0];
+  $self->config->{last_seen}->{lc $who} = { as => $who, time => time };
+  $_[KERNEL]->yield('save_config');
+};
+
 # Wheel event, including the wheel's ID.
 event got_child_stdout => sub {
   my ($self, $stdout_line, $wheel_id) = @_[OBJECT, ARG0, ARG1];
@@ -443,10 +450,17 @@ event got_child_stdout => sub {
     return;
   }
 
+  if (my ($who) = $parse->{message} =~ /\A(\S+) (joined|left) the game/) {
+    $_[KERNEL]->yield(saw_player => "$1");
+    return;
+  }
+
   if (my ($who, $what) = $parse->{message} =~ /\A<([^>]+)>\s+(.+)\z/) {
     my $orig_what = $what;
     $who  = lc $who;
     $what = lc $what;
+
+    $_[KERNEL]->yield(saw_player => "$1");
 
     if    ($what eq '!hub')     { $server->put("tp $who " . $self->hub_xyz_str) }
     elsif ($what eq '!home')    { $server->put("tp $who " . $self->home_for($who)->as_string); }
@@ -472,6 +486,19 @@ event got_child_stdout => sub {
         },
       });
       $server->put("tp $who ~ ~ ~");
+    }
+
+    elsif ($orig_what =~ /\A!seen\s+(.+?)\s*\z/i) {
+      my $ask_about = (lc $1) =~ s/ //gr;
+
+      if (my $last = $self->config->{last_seen}{$1}) {
+        my $ago = ago(time - $last->{time});
+        $self->server->put("say Last activity from $last->{as} was $ago.");
+        return;
+      }
+
+      $self->server->put("No activity ever from $ask_about.");
+      return;
     }
 
     elsif ($what eq '!random') {
