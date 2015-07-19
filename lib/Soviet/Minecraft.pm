@@ -545,8 +545,8 @@ event got_child_stdout => sub {
       $server->put("tp $who " . $self->porch_for($1)->as_string);
     }
 
-    elsif ($what =~ /\A!mode (creative|survival)\z/i) {
-      my $mode = $1 eq 'creative' ? 1 : 0;
+    elsif ($what =~ /\A!mode (creative|spectator|survival)\z/i) {
+      my $mode = lc $1;
       $server->put("gamemode $mode $who");
     }
 
