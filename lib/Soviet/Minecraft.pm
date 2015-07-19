@@ -174,6 +174,9 @@ event _http_sms => sub {
   } elsif ($text =~ /\Aannounce (.+)\z/i) {
     $command = "say $1";
     $reply   = "Okay, I've passed along that message!";
+  } elsif ($text eq 'status') {
+    my $ago = ago(time - $^T);
+    $reply   = "Soviet Minecraft in session since $ago.";
   } elsif ($text eq 'emergency shutdown' or $text eq 'emergency shut down') {
     $command = "stop";
     $reply   = "I'm issuing an emergency shutdown!";
