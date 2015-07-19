@@ -288,10 +288,11 @@ event got_cast_vote => sub {
 
 event got_updated_player_count => sub {
   my ($self, $curr, $max) = @_[OBJECT, ARG0, ARG1];
+  my $majority = int($curr / 2) + 1;
   for my $which ($self->elections) {
     my $election = $self->election_for($which);
     my $votes = values %{ $election->{votes} };
-    if ($votes >= $curr) {
+    if ($votes >= $majority) {
       $_[KERNEL]->yield(election_complete => $which);
     }
   }
