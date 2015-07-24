@@ -641,7 +641,7 @@ sub naive_parse {
     \s+
     \[([^\]]+)\]:
     \s+
-    (.+)
+    (.*)
   /x;
 
   return unless defined $ts;
