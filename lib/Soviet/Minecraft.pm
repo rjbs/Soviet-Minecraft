@@ -176,7 +176,8 @@ event _http_sms => sub {
     $reply   = "Okay, I've passed along that message!";
   } elsif ($text eq 'status') {
     my $ago = ago(time - $^T);
-    $reply   = "Soviet Minecraft in session since $ago.";
+    my $online = (join q{, }, $self->players_online) || "(no one)";
+    $reply = "Soviet Minecraft in session since $ago.  Players online: $online";
   } elsif ($text eq 'emergency shutdown' or $text eq 'emergency shut down') {
     $command = "stop";
     $reply   = "I'm issuing an emergency shutdown!";
@@ -435,6 +436,13 @@ has _expecting_player_list => (
   default => 0,
 );
 
+has _players_online => (
+  is => 'rw',
+  default => sub { { observed_at => $^T, players => [] } },
+);
+
+sub players_online { @{ $_[0]->_players_online->{players} } }
+
 # Wheel event, including the wheel's ID.
 event got_child_stdout => sub {
   my ($self, $stdout_line, $wheel_id) = @_[OBJECT, ARG0, ARG1];
@@ -448,7 +456,10 @@ event got_child_stdout => sub {
 
   if ($self->_expecting_player_list) {
     my (@players) = split /\s*,\s*/, $parse->{message};
-    $server->put("say players: @players");
+    $self->_players_online({
+      players     => \@players,
+      observed_at => time,
+    });
     $self->_expecting_player_list(0);
     return;
   }
@@ -469,6 +480,7 @@ event got_child_stdout => sub {
 
   if (my ($who) = $parse->{message} =~ /\A(\S+) (joined|left) the game/) {
     $_[KERNEL]->yield(saw_player => "$1");
+    $self->server->put("list");
     return;
   }
 
