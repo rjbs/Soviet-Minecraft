@@ -430,6 +430,11 @@ event saw_player => sub {
   $_[KERNEL]->yield('save_config');
 };
 
+has _expecting_player_list => (
+  is      => 'rw',
+  default => 0,
+);
+
 # Wheel event, including the wheel's ID.
 event got_child_stdout => sub {
   my ($self, $stdout_line, $wheel_id) = @_[OBJECT, ARG0, ARG1];
@@ -441,6 +446,13 @@ event got_child_stdout => sub {
   # [11:01:28] [Server thread/INFO]: <rjbs> go home
   return unless my $parse = naive_parse($stdout_line);
 
+  if ($self->_expecting_player_list) {
+    my (@players) = split /\s*,\s*/, $parse->{message};
+    $server->put("say players: @players");
+    $self->_expecting_player_list(0);
+    return;
+  }
+
   if (my $tp = tp_parse($parse->{message})) {
     $_[KERNEL]->yield(got_xyz_teleport => lc $tp->{who}, $tp);
     return;
@@ -450,6 +462,7 @@ event got_child_stdout => sub {
     my ($curr, $max) =
       $parse->{message} =~ m{\AThere are ([0-9]+)/([0-9]+) players}
   ) {
+    $self->_expecting_player_list(1);
     $_[KERNEL]->yield(got_updated_player_count => $curr, $max);
     return;
   }
