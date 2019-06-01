@@ -48,6 +48,15 @@ has server => (
   clearer  => 'clear_server',
 );
 
+has java_path => (
+  is => 'ro',
+  lazy => 1,
+  default => sub {
+    my ($self) = @_;
+    $self->config->{java_path} || 'java';
+  },
+);
+
 has minecraft_jar => (
   is => 'ro',
   lazy => 1,
@@ -62,7 +71,9 @@ sub _setup_server {
 
   my $server = POE::Wheel::Run->new(
     Program => [
-      qw(java -Xms1024M -Xmx1024M -jar), $self->minecraft_jar, qw(nogui),
+      $self->java_path,
+      qw(-Xms1024M -Xmx1024M -jar),
+      $self->minecraft_jar, qw(nogui),
     ],
     StdoutEvent  => "got_child_stdout",
     StderrEvent  => "got_child_stderr",
