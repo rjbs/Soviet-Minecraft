@@ -544,7 +544,7 @@ event got_child_stdout => sub {
     elsif ($what eq '!random') {
       my $location = $self->random_unowned_location;
       if ($location) {
-        $server->put("gamemode 1 $who");
+        $server->put("gamemode creative $who");
         $server->put("tp $who " . $location->as_string);
       } else {
         $server->put("msg $who I couldn't find a random place to send you!");
