@@ -525,7 +525,7 @@ event got_child_stdout => sub {
           $server->put("msg $who Your home has been updated.");
         },
       });
-      $server->put("tp $who ~ ~ ~");
+      $server->put("execute as $who at $who run tp ~ ~ ~");
     }
 
     elsif ($orig_what =~ /\A!seen\s+(.+?)\s*\z/i) {
@@ -570,7 +570,7 @@ event got_child_stdout => sub {
           }
         },
       });
-      $server->put("tp $who ~ ~ ~");
+      $server->put("execute as $who at $who run tp ~ ~ ~");
     }
 
     elsif ($what eq '!set porch')  {
@@ -583,7 +583,7 @@ event got_child_stdout => sub {
           $server->put("msg $who Your front porch location has been updated.");
         },
       });
-      $server->put("tp $who ~ ~ ~");
+      $server->put("execute as $who at $who run tp ~ ~ ~");
     }
 
     elsif ($what eq '!sunrise') {
