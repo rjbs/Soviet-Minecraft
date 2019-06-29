@@ -616,6 +616,10 @@ event got_child_stdout => sub {
       $server->put("effect give $who minecraft:night_vision 300");
     }
 
+    elsif ($what =~ /\A!eat\s*\z/i) {
+      $server->put("effect give $who minecraft:saturation 1 20");
+    }
+
     elsif ($what =~ /\A!heal\s*\z/i) {
       $server->put("effect give $who minecraft:instant_health 1 20");
     }
