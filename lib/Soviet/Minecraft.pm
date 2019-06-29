@@ -482,7 +482,7 @@ event got_child_stdout => sub {
 
   if (
     my ($curr, $max) =
-      $parse->{message} =~ m{\AThere are ([0-9]+)/([0-9]+) players}
+      $parse->{message} =~ m{\AThere are ([0-9]+) of a max ([0-9]+) players}
   ) {
     $self->_expecting_player_list(1);
     $_[KERNEL]->yield(got_updated_player_count => $curr, $max);
